@@ -55,6 +55,7 @@ func newHelmDocsCommand(run func(cmd *cobra.Command, args []string)) (*cobra.Com
 	command.PersistentFlags().StringP("values-file", "f", "values.yaml", "Path to values file")
 	command.PersistentFlags().BoolP("document-dependency-values", "u", false, "For charts with dependencies, include the dependency values in the chart values documentation")
 	command.PersistentFlags().BoolP("dependency-values-as-sections", "a", true, "Put dependency values into separate sections")
+	command.PersistentFlags().StringSliceP("chart-to-generate", "g", []string{}, "List of charts that will have documentation generated. Comma separated, no space. Empty list - generate for all charts in chart-search-root")
 
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("HELM_DOCS")
