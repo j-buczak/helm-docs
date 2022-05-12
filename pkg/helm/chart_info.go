@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -16,6 +17,7 @@ import (
 )
 
 var valuesDescriptionRegex = regexp.MustCompile("^\\s*#\\s*(.*)\\s+--\\s*(.*)$")
+var sectionTitleRegex = regexp.MustCompile("^\\s*#\\s+@section\\s*(.*)$")
 var sectionDescriptionRegex = regexp.MustCompile("^\\s*#\\s+@section")
 var commentContinuationRegex = regexp.MustCompile("^\\s*#(\\s?)(.*)$")
 var defaultValueRegex = regexp.MustCompile("^\\s*# @default -- (.*)$")
@@ -67,6 +69,7 @@ type ChartDocumentationInfo struct {
 
 	ChartDirectory          string
 	ChartValues             *yaml.Node
+	ChartValuesSections     map[int]string
 	ChartValuesDescriptions map[string]ChartValueDescription
 }
 
@@ -146,6 +149,28 @@ func parseChartRequirementsFile(chartDirectory string, apiVersion string) (Chart
 	return chartRequirements, nil
 }
 
+func printNode(node *yaml.Node, prefix string) {
+	fmt.Println(prefix, "Kind: ", node.Kind)
+	fmt.Println(prefix, "Style: ", node.Style)
+	fmt.Println(prefix, "Tag: ", node.Tag)
+	fmt.Println(prefix, "Value: ", node.Value)
+	// fmt.Println(prefix, "Anchor: ", node.Anchor)
+	// fmt.Println(prefix, "Alias: ", node.Alias)
+	fmt.Println(prefix, "Content: ", node.Content)
+	fmt.Println(prefix, "HeadComment: ", node.HeadComment)
+	// fmt.Println(prefix, "LineComment: ", node.LineComment)
+	// fmt.Println(prefix, "FootComment: ", node.FootComment)
+	fmt.Println(prefix, "Line: ", node.Line)
+	fmt.Println(prefix, "Column: ", node.Column)
+}
+
+func printNodes(node *yaml.Node, prefix string) {
+	printNode(node, prefix)
+	for i, n := range node.Content {
+		printNodes(n, prefix+"   "+strconv.Itoa(i)+" ")
+	}
+}
+
 func parseChartValuesFile(chartDirectory string) (yaml.Node, error) {
 	valuesPath := filepath.Join(chartDirectory, viper.GetString("values-file"))
 	yamlFileContents, err := getYamlFileContents(valuesPath)
@@ -156,15 +181,22 @@ func parseChartValuesFile(chartDirectory string) (yaml.Node, error) {
 	}
 
 	err = yaml.Unmarshal(yamlFileContents, &values)
+	// fmt.Println("DocumentNode: ", yaml.DocumentNode)
+	// fmt.Println("SequenceNode: ", yaml.SequenceNode)
+	// fmt.Println("MappingNode: ", yaml.MappingNode)
+	// fmt.Println("ScalarNode: ", yaml.ScalarNode)
+	// fmt.Println("AliasNode: ", yaml.AliasNode)
+	// printNodes(&values, "")
+	// fmt.Println(len(values.Content[0].Content))
 	return values, err
 }
 
-func parseChartValuesFileComments(chartDirectory string) (map[string]ChartValueDescription, error) {
+func parseChartValuesFileComments(chartDirectory string) (map[string]ChartValueDescription, map[int]string, error) {
 	valuesPath := filepath.Join(chartDirectory, viper.GetString("values-file"))
 	valuesFile, err := os.Open(valuesPath)
 
 	if isErrorInReadingNecessaryFile(valuesPath, err) {
-		return map[string]ChartValueDescription{}, err
+		return map[string]ChartValueDescription{}, map[int]string{}, err
 	}
 
 	defer valuesFile.Close()
@@ -173,12 +205,23 @@ func parseChartValuesFileComments(chartDirectory string) (map[string]ChartValueD
 	scanner := bufio.NewScanner(valuesFile)
 	foundValuesComment := false
 	commentLines := make([]string, 0)
+	lineNoToSection := make(map[int]string)
+	var lineNo int = 0
 
 	for scanner.Scan() {
+		lineNo++
 		currentLine := scanner.Text()
 
 		// If we've not yet found a values comment with a key name, try and find one on each line
 		if !foundValuesComment {
+			// First check if this line is not a new section
+			sectionMatch := sectionTitleRegex.FindStringSubmatch(currentLine)
+			fmt.Println(sectionMatch)
+			if len(sectionMatch) == 2 && sectionMatch[1] != "" {
+				lineNoToSection[lineNo] = sectionMatch[1]
+				continue
+			}
+
 			match := valuesDescriptionRegex.FindStringSubmatch(currentLine)
 			if len(match) < 3 {
 				continue
@@ -209,8 +252,8 @@ func parseChartValuesFileComments(chartDirectory string) (map[string]ChartValueD
 		commentLines = make([]string, 0)
 		foundValuesComment = false
 	}
-
-	return keyToDescriptions, nil
+	fmt.Println(lineNoToSection)
+	return keyToDescriptions, lineNoToSection, nil
 }
 
 func ParseChartInformation(chartDirectory string) (ChartDocumentationInfo, error) {
@@ -234,7 +277,7 @@ func ParseChartInformation(chartDirectory string) (ChartDocumentationInfo, error
 	}
 
 	chartDocInfo.ChartValues = &chartValues
-	chartDocInfo.ChartValuesDescriptions, err = parseChartValuesFileComments(chartDirectory)
+	chartDocInfo.ChartValuesDescriptions, chartDocInfo.ChartValuesSections, err = parseChartValuesFileComments(chartDirectory)
 	if err != nil {
 		return chartDocInfo, err
 	}
